@@ -1,6 +1,239 @@
-<html>
-  <h1>Test</h1>
-  <body>
-    Pokus
-  </body>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>MQTT Subscription</title>
+  <!-- Include MQTT.js library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.2.7/mqtt.min.js"></script>
+<!--  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.js"></script>-->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/raphael@2.3.0/raphael.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gaugeJS/dist/gauge.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+</head>
+
+<style>
+  table {
+    text-align: center;
+    border: 1px solid black;
+    border-radius: 10px;
+    padding: 5px;
+    width: 200px;
+    background-color: rgba(255, 99, 71, 0.5);
+  }
+</style>
+
+<body style="margin-left: 20px;">
+  <h1>Snímání hladiny nádrže</h1>
+
+  <table style="text-align: center;border: 1px solid black; border-radius: 10px;padding: 5px">
+    <tr>
+      <th>Poslední aktualizace</th>
+    </tr>
+    <tr>
+      <td><span id="latest_time_update"></span></td>
+    </tr>
+  </table>
+  <br>
+  Server: <span id="server_status" style="margin-right: 20px"></span>
+  Snímač: <span id="sensor_status"></span>
+  <br>
+<!--  <button onclick="get_level_history_data()">Click me</button>-->
+  <br>
+  <canvas id="gauge-container" height="100" width="200"></canvas>
+
+  <table>
+    <tr>
+      <th>Aktuální hladina</th>
+    </tr>
+    <tr>
+      <td style="font-size: 30px;"><span id="current_level""></span> %</td>
+    </tr>
+  </table>
+
+  <table>
+    <tr>
+      <th>Celková spotřeba v m3</th>
+    </tr>
+    <tr>
+      <td><span id="total_consumption_cubics"></span></td>
+    </tr>
+  </table>
+
+  <table>
+    <tr>
+      <th>Celková spotřeba v L</th>
+    </tr>
+    <tr>
+      <td><span id="total_consumption_liters"></span></td>
+    </tr>
+  </table>
+
+  <br>
+  <span style="font-size: 10px;">
+  Počátek měření spotřeby od data
+  <br>
+  <span id="since_consumption_date"></span>
+  </span>
+
+  <br>
+   <canvas id="bar-chart"></canvas>
+
+  <script>
+    const textDecoder = new TextDecoder();
+    var daily_consumption_cmd_response = {};
+    var current_data_cmd_response = {};
+    // Broker
+    const brokerUrl = 'wss://b0a3b7f8ba55433da62703b2e2aeb6cf.s2.eu.hivemq.cloud:8884/mqtt'; // Use wss for secure WebSocket connection
+    const clientId = 'web-client-' + Math.random().toString(16).substr(2, 8); // Generate a random client ID
+
+    const topic = 'GsmClientTest/cottage/water/level'; // Replace with the topic you want to subscribe to
+	const pub_topic = 'boiler2/inc';
+
+    const client = mqtt.connect(brokerUrl, {
+      username: "client",
+      password: "Client298030",
+      clientId: clientId
+    });
+
+    client.on('connect', () => {
+      console.log('Connected to MQTT broker');
+      // Subscribe to the specified topic
+      client.subscribe('GSMCottage/water/level');
+      client.subscribe('GSMCottage/data/level_history');
+      client.subscribe('GSMCottage/data/daily_consumption_history');
+      client.subscribe('GSMCottage/data/current_data');
+      // client.subscribe('GSMCottage/give/me/data');
+      client.subscribe('GSMCottage/server/status');
+    });
+
+    client.on('message', (topic, message) => {
+      console.log(`Received message on topic ${topic}: ${message.toString()}`);
+
+      // Server status
+      if (topic == "GSMCottage/server/status") {
+        if (message == "Online") {
+          document.getElementById('server_status').textContent = "Aktivní";
+          document.getElementById("server_status").style.backgroundColor = 'rgba(0,255,0, 0.5)';
+          document.getElementById('server_status').style.fontWeight = "bold";
+        } else {
+          document.getElementById('server_status').textContent = "Odpojeno";
+          document.getElementById("server_status").style.color = "gray";
+          document.getElementById('server_status').style.fontWeight = "bold";
+          document.getElementById("server_status").style.backgroundColor = 'white';
+        }
+      }
+
+      // Sensor status
+      if (topic == "GSMCottage/water/status") {
+        if (message == "Online") {
+          document.getElementById('sensor_status').textContent = "Aktivní";
+          document.getElementById("sensor_status").style.backgroundColor = 'rgba(0,255,0, 0.5)';
+          document.getElementById('server_status').style.fontWeight = "bold";
+        } else {
+          document.getElementById('sensor_status').textContent = "Odpojeno";
+          document.getElementById("sensor_status").style.color = "gray";
+          document.getElementById('sensor_status').style.fontWeight = "bold";
+          document.getElementById("sensor_status").style.backgroundColor = 'white';
+        }
+      }
+
+      // ----------------------- start Current Data ----------------------------------------------------------------
+      if (topic == "GSMCottage/data/current_data") {
+        var jsonString = textDecoder.decode(message);
+        jsonString = jsonString.replace('False', 'false');
+        jsonString = jsonString.replace('True', 'true');
+        jsonString = jsonString.replace('None', '"none"');
+        jsonString = jsonString.replace(/'/g, '"');
+        current_data_cmd_response = JSON.parse(jsonString);
+
+        document.getElementById('latest_time_update').textContent = current_data_cmd_response["datetime"];
+        document.getElementById('current_level').textContent = current_data_cmd_response["current_level"];
+        document.getElementById('total_consumption_liters').textContent = current_data_cmd_response["total_consumption_liters"];
+        document.getElementById('total_consumption_cubics').textContent = current_data_cmd_response["total_consumption_cubics"];
+        document.getElementById('since_consumption_date').textContent = current_data_cmd_response["since_consumption_date"];
+        gauge.set(current_data_cmd_response["current_level"]);
+      }
+      // ----------------------- end Current Data ----------------------------------------------------------------
+
+      // ************************* daily_consumption_history *****************************************************
+      if (topic == "GSMCottage/data/daily_consumption_history") {
+        var jsonString = textDecoder.decode(message);
+        jsonString = jsonString.replace('False', 'false');
+        jsonString = jsonString.replace('True', 'true');
+        jsonString = jsonString.replace('None', '"none"');
+        jsonString = jsonString.replace(/'/g, '"');
+        daily_consumption_cmd_response = JSON.parse(jsonString);
+        create_history_chart();
+      }
+      // ************************* end daily_consumption_history *************************************************
+
+    });
+
+    client.publish("GSMCottage/give/me/data", "current_data");
+    client.publish("GSMCottage/give/me/data", "daily_consumption_history");
+
+    // Get a reference to the gauge container
+    var gaugeContainer = document.getElementById("gauge-container");
+
+    // Create a new Gauge instance
+    var opts = {
+      angle: 0, // Starting angle in degrees
+      lineWidth: 0.44, // The line thickness
+      radiusScale: 1, // Scale factor for the radius
+      pointer: {
+        length: 0.6, // Length of the gauge pointer
+        strokeWidth: 0.035, // Thickness of the pointer
+        color: "#000000" // Color of the pointer
+      },
+      staticLabels: {
+        font: "10px sans-serif", // Font for the labels
+        labels: [0, 15, 25, 50, 75, 100], // Values for the labels
+        color: "#000000" // Color of the labels
+      },
+      staticZones: [
+        {strokeStyle: "#F03E3E", min: 0, max: 15}, // Red zone
+        {strokeStyle: "#30B32D", min: 15, max: 100} // Green zone
+      ],
+      limitMax: false, // If true, the gauge will display a max gauge value
+      limitMin: false, // If true, the gauge will display a min gauge value
+      highDpiSupport: true // Enable high DPI support
+    };
+    var gauge = new Gauge(gaugeContainer).setOptions(opts);
+
+    // Set the initial value
+    gauge.maxValue = 100; // Set the maximum value for the gauge
+    gauge.set(0); // Set the initial value for the gauge
+
+
+    <!-- fetch-data interval -->
+	setInterval(function() {
+      client.publish("GSMCottage/give/me/data", "current_data");
+      client.publish("GSMCottage/give/me/data", "daily_consumption_history");
+    }, 30000);  // 30 sec
+
+    function create_history_chart() {
+      // df
+      var ctx1 = document.getElementById('bar-chart').getContext('2d');
+      var chart1 = new Chart(ctx1, {
+          type: 'bar',
+          data: {
+              labels: daily_consumption_cmd_response["datetime"],
+              datasets: [{
+                  label: 'Historie',
+                  data: daily_consumption_cmd_response["consumption_m3"],
+                  backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                  borderColor: 'rgba(255,99,132,1)',
+                  borderWidth: 1
+              }]
+          }
+      });
+    }
+
+
+  </script>
+</body>
+
 </html>
+
